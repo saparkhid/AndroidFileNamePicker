@@ -1,8 +1,8 @@
 package javautil;
-
 import android.annotation.SuppressLint;
 import android.content.ContentUris;
 import android.content.Context;
+import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -12,35 +12,35 @@ import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
 import android.util.Log;
+import android.webkit.MimeTypeMap;
+import android.widget.Toast;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
 
 public class FileUtils {
     private static Uri contentUri = null;
 
-    /**
-     * Get a file path from a Uri. This will get the the path for Storage Access
-     * Framework Documents, as well as the _data field for the MediaStore and
-     * other file-based ContentProviders.<br>
-     * <br>
-     * Callers should check whether the path is local before assuming it
-     * represents a local file.
-     *
-     * @param context The context.
-     * @param uri     The Uri to query.
-     */
+    Context context;
+
+    public FileUtils( Context context) {
+        this.context=context;
+    }
+
     @SuppressLint("NewApi")
-    public static String getPath(final Context context, final Uri uri) {
+    public static String getPath( final Uri uri) {
         // check here to KITKAT or new version
         final boolean isKitKat = Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT;
         String selection = null;
         String[] selectionArgs = null;
         // DocumentProvider
-        if (isKitKat && DocumentsContract.isDocumentUri(context, uri)) {
+        if (isKitKat ) {
             // ExternalStorageProvider
-            if (isExternalStorageDocument(uri)) {
+
+           if (isExternalStorageDocument(uri)) {
                 final String docId = DocumentsContract.getDocumentId(uri);
                 final String[] split = docId.split(":");
                 final String type = split[0];
@@ -53,8 +53,11 @@ public class FileUtils {
                 }
             }
 
+
             // DownloadsProvider
-            else if (isDownloadsDocument(uri)) {
+
+            if (isDownloadsDocument(uri)) {
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     final String id;
                     Cursor cursor = null;
@@ -67,7 +70,8 @@ public class FileUtils {
                                 return path;
                             }
                         }
-                    } finally {
+                    }
+                    finally {
                         if (cursor != null)
                             cursor.close();
                     }
@@ -84,8 +88,6 @@ public class FileUtils {
                             try {
                                 final Uri contentUri = ContentUris.withAppendedId(Uri.parse(contentUriPrefix), Long.valueOf(id));
 
-                         /*   final Uri contentUri = ContentUris.withAppendedId(
-                                    Uri.parse("content://downloads/public_downloads"), Long.valueOf(id));*/
 
                                 return getDataColumn(context, contentUri, null, null);
                             } catch (NumberFormatException e) {
@@ -96,29 +98,30 @@ public class FileUtils {
 
 
                     }
-
-                } else {
+                }
+                else {
                     final String id = DocumentsContract.getDocumentId(uri);
-                    final boolean isOreo = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O;
+
                     if (id.startsWith("raw:")) {
                         return id.replaceFirst("raw:", "");
                     }
                     try {
                         contentUri = ContentUris.withAppendedId(
                                 Uri.parse("content://downloads/public_downloads"), Long.valueOf(id));
-
-                    } catch (NumberFormatException e) {
+                    }
+                    catch (NumberFormatException e) {
                         e.printStackTrace();
                     }
                     if (contentUri != null) {
+
                         return getDataColumn(context, contentUri, null, null);
                     }
                 }
-
-
             }
+
+
             // MediaProvider
-            else if (isMediaDocument(uri)) {
+           if (isMediaDocument(uri)) {
                 final String docId = DocumentsContract.getDocumentId(uri);
                 final String[] split = docId.split(":");
                 final String type = split[0];
@@ -132,67 +135,85 @@ public class FileUtils {
                 } else if ("audio".equals(type)) {
                     contentUri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
                 }
-                  selection = "_id=?";
-                 selectionArgs = new String[]{split[1]};
+                selection = "_id=?";
+                selectionArgs = new String[]{split[1]};
 
 
                 return getDataColumn(context, contentUri, selection,
                         selectionArgs);
-            } else if (isGoogleDriveUri(uri)) {
-                return getDriveFilePath(uri, context);
+            }
+
+           if (isGoogleDriveUri(uri)) {
+                return getDriveFilePath(uri);
+            }
+
+           if(isWhatsAppFile(uri)){
+                return getFilePathForWhatsApp(uri);
+            }
+
+
+           if ("content".equalsIgnoreCase(uri.getScheme())) {
+
+                if (isGooglePhotosUri(uri)) {
+                    return uri.getLastPathSegment();
+                }
+                if (isGoogleDriveUri(uri)) {
+                    return getDriveFilePath(uri);
+                }
+                if( Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                {
+
+                    // return getFilePathFromURI(context,uri);
+                    return copyFileToInternalStorage(uri,"userfiles");
+                    // return getRealPathFromURI(context,uri);
+                }
+                else
+                {
+                    return getDataColumn(context, uri, null, null);
+                }
+
+           }
+           if ("file".equalsIgnoreCase(uri.getScheme())) {
+                return uri.getPath();
+            }
+        }
+        else {
+
+            if(isWhatsAppFile(uri)){
+                return getFilePathForWhatsApp(uri);
+            }
+
+            if ("content".equalsIgnoreCase(uri.getScheme())) {
+                String[] projection = {
+                        MediaStore.Images.Media.DATA
+                };
+                Cursor cursor = null;
+                try {
+                    cursor = context.getContentResolver()
+                            .query(uri, projection, selection, selectionArgs, null);
+                    int column_index = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA);
+                    if (cursor.moveToFirst()) {
+                        return cursor.getString(column_index);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
         }
 
 
-        // MediaStore (and general)
-        else if ("content".equalsIgnoreCase(uri.getScheme())) {
 
-            if (isGooglePhotosUri(uri)) {
-                return uri.getLastPathSegment();
-            }
-
-            if (isGoogleDriveUri(uri)) {
-                return getDriveFilePath(uri, context);
-            }
-             if( Build.VERSION.SDK_INT == Build.VERSION_CODES.N)
-             {
-                // return getFilePathFromURI(context,uri);
-                 return getMediaFilePathForN(uri, context);
-                // return getRealPathFromURI(context,uri);
-             }else
-             {
-
-                 return getDataColumn(context, uri, null, null);
-             }
-
-
-        }
-        // File
-        else if ("file".equalsIgnoreCase(uri.getScheme())) {
-            return uri.getPath();
-        }
 
         return null;
     }
 
-    /**
-     * Check if a file exists on device
-     *
-     * @param filePath The absolute file path
-     */
-    private static boolean fileExists(String filePath) {
+    private  boolean fileExists(String filePath) {
         File file = new File(filePath);
 
         return file.exists();
     }
 
-
-    /**
-     * Get full file path from external storage
-     *
-     * @param pathData The storage type and the relative path
-     */
-    private static String getPathFromExtSD(String[] pathData) {
+    private String getPathFromExtSD(String[] pathData) {
         final String type = pathData[0];
         final String relativePath = "/" + pathData[1];
         String fullPath = "";
@@ -227,7 +248,7 @@ public class FileUtils {
         return fullPath;
     }
 
-    private static String getDriveFilePath(Uri uri, Context context) {
+    private String getDriveFilePath(Uri uri) {
         Uri returnUri = uri;
         Cursor returnCursor = context.getContentResolver().query(returnUri, null, null, null, null);
         /*
@@ -266,9 +287,20 @@ public class FileUtils {
         return file.getPath();
     }
 
-    private static String getMediaFilePathForN(Uri uri, Context context) {
+    /***
+     * Used for Android Q+
+     * @param uri
+     * @param newDirName if you want to create a directory, you can set this variable
+     * @return
+     */
+    private String copyFileToInternalStorage(Uri uri,String newDirName) {
         Uri returnUri = uri;
-        Cursor returnCursor = context.getContentResolver().query(returnUri, null, null, null, null);
+
+        Cursor returnCursor = context.getContentResolver().query(returnUri, new String[]{
+                OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE
+        }, null, null, null);
+
+
         /*
          * Get the column indexes of the data in the Cursor,
          *     * move to the first row in the Cursor, get the data,
@@ -279,35 +311,45 @@ public class FileUtils {
         returnCursor.moveToFirst();
         String name = (returnCursor.getString(nameIndex));
         String size = (Long.toString(returnCursor.getLong(sizeIndex)));
-        File file = new File(context.getFilesDir(), name);
+
+        File output;
+        if(!newDirName.equals("")) {
+            File dir = new File(context.getFilesDir() + "/" + newDirName);
+            if (!dir.exists()) {
+                dir.mkdir();
+            }
+            output = new File(context.getFilesDir() + "/" + newDirName + "/" + name);
+        }
+        else{
+            output = new File(context.getFilesDir() + "/" + name);
+        }
         try {
             InputStream inputStream = context.getContentResolver().openInputStream(uri);
-            FileOutputStream outputStream = new FileOutputStream(file);
+            FileOutputStream outputStream = new FileOutputStream(output);
             int read = 0;
-            int maxBufferSize = 1 * 1024 * 1024;
-            int bytesAvailable = inputStream.available();
-
-            //int bufferSize = 1024;
-            int bufferSize = Math.min(bytesAvailable, maxBufferSize);
-
+            int bufferSize = 1024;
             final byte[] buffers = new byte[bufferSize];
             while ((read = inputStream.read(buffers)) != -1) {
                 outputStream.write(buffers, 0, read);
             }
-            Log.e("File Size", "Size " + file.length());
+
             inputStream.close();
             outputStream.close();
-            Log.e("File Path", "Path " + file.getPath());
-            Log.e("File Size", "Size " + file.length());
-        } catch (Exception e) {
+
+        }
+        catch (Exception e) {
+
             Log.e("Exception", e.getMessage());
         }
-        return file.getPath();
+
+        return output.getPath();
     }
 
+    private String getFilePathForWhatsApp(Uri uri){
+            return  copyFileToInternalStorage(uri,"whatsapp");
+    }
 
-    private static String getDataColumn(Context context, Uri uri,
-                                        String selection, String[] selectionArgs) {
+    private String getDataColumn(Context context, Uri uri, String selection, String[] selectionArgs) {
         Cursor cursor = null;
         final String column = "_data";
         final String[] projection = {column};
@@ -320,7 +362,8 @@ public class FileUtils {
                 final int index = cursor.getColumnIndexOrThrow(column);
                 return cursor.getString(index);
             }
-        } finally {
+        }
+        finally {
             if (cursor != null)
                 cursor.close();
         }
@@ -328,44 +371,27 @@ public class FileUtils {
         return null;
     }
 
-    /**
-     * @param uri - The Uri to check.
-     * @return - Whether the Uri authority is ExternalStorageProvider.
-     */
-    private static boolean isExternalStorageDocument(Uri uri) {
+    private  boolean isExternalStorageDocument(Uri uri) {
         return "com.android.externalstorage.documents".equals(uri.getAuthority());
     }
 
-    /**
-     * @param uri - The Uri to check.
-     * @return - Whether the Uri authority is DownloadsProvider.
-     */
-    private static boolean isDownloadsDocument(Uri uri) {
+    private  boolean isDownloadsDocument(Uri uri) {
         return "com.android.providers.downloads.documents".equals(uri.getAuthority());
     }
 
-    /**
-     * @param uri - The Uri to check.
-     * @return - Whether the Uri authority is MediaProvider.
-     */
-    private static boolean isMediaDocument(Uri uri) {
+    private  boolean isMediaDocument(Uri uri) {
         return "com.android.providers.media.documents".equals(uri.getAuthority());
     }
 
-    /**
-     * @param uri - The Uri to check.
-     * @return - Whether the Uri authority is Google Photos.
-     */
-    private static boolean isGooglePhotosUri(Uri uri) {
+    private  boolean isGooglePhotosUri(Uri uri) {
         return "com.google.android.apps.photos.content".equals(uri.getAuthority());
     }
 
+    public boolean isWhatsAppFile(Uri uri){
+        return "com.whatsapp.provider.media".equals(uri.getAuthority());
+    }
 
-    /**
-     * @param uri The Uri to check.
-     * @return Whether the Uri authority is Google Drive.
-     */
-    private static boolean isGoogleDriveUri(Uri uri) {
+    private  boolean isGoogleDriveUri(Uri uri) {
         return "com.google.android.apps.docs.storage".equals(uri.getAuthority()) || "com.google.android.apps.docs.storage.legacy".equals(uri.getAuthority());
     }
 
